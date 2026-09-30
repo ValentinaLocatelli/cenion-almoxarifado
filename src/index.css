@@ -1,0 +1,279 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
+
+@layer base {
+  :root {
+    /* Brand Colors - Cenion Preset */
+    --cenion-offwhite: 222 13% 80%;
+    --cenion-violet: 258 95% 61%;
+    --cenion-dark-violet: 249 29% 13%;
+
+    --background: 220 20% 97%;
+    --foreground: 222 47% 11%;
+
+    --card: 0 0% 100%;
+    --card-foreground: 222 47% 11%;
+
+    --popover: 0 0% 100%;
+    --popover-foreground: 222 47% 11%;
+
+    --primary: var(--cenion-violet);
+    --primary-foreground: 0 0% 100%;
+
+    --secondary: 220 14% 96%;
+    --secondary-foreground: 222 47% 11%;
+
+    --muted: 220 14% 96%;
+    --muted-foreground: 220 9% 46%;
+
+    --accent: 220 14% 96%;
+    --accent-foreground: 222 47% 11%;
+
+    --destructive: 0 84% 60%;
+    --destructive-foreground: 0 0% 100%;
+
+    --border: 220 13% 91%;
+    --input: 220 13% 91%;
+    --ring: var(--cenion-violet);
+
+    --radius: 0.5rem;
+
+    /* Status Colors */
+    --status-open: 221 83% 53%;
+    --status-analysis: 45 93% 47%;
+    --status-waiting: 25 95% 53%;
+    --status-approved: 142 71% 45%;
+    --status-execution: 262 83% 58%;
+    --status-finished: 142 76% 36%;
+    --status-dispatched: 215 16% 47%;
+    --status-invoiced: 220 9% 46%;
+
+    /* Priority Colors */
+    --priority-low: 142 71% 45%;
+    --priority-medium: 45 93% 47%;
+    --priority-high: 25 95% 53%;
+    --priority-critical: 0 84% 60%;
+
+    /* Sidebar */
+    --sidebar-background: var(--cenion-dark-violet);
+    --sidebar-foreground: 220 14% 96%;
+    --sidebar-primary: var(--cenion-violet);
+    --sidebar-primary-foreground: 0 0% 100%;
+    --sidebar-accent: 254 29% 19%;
+    --sidebar-accent-foreground: 220 14% 96%;
+    --sidebar-border: 257 30% 16%;
+    --sidebar-ring: var(--cenion-violet);
+
+    /* Gradients */
+    --gradient-primary: linear-gradient(135deg, hsl(258, 95%, 61%) 0%, hsl(258, 78%, 50%) 100%);
+    --gradient-success: linear-gradient(135deg, hsl(142, 71%, 45%) 0%, hsl(142, 76%, 36%) 100%);
+    --gradient-warning: linear-gradient(135deg, hsl(45, 93%, 47%) 0%, hsl(25, 95%, 53%) 100%);
+
+    /* Shadows */
+    --shadow-sm: 0 1px 2px 0 hsl(222 47% 11% / 0.05);
+    --shadow-md: 0 4px 6px -1px hsl(222 47% 11% / 0.1), 0 2px 4px -2px hsl(222 47% 11% / 0.1);
+    --shadow-lg: 0 10px 15px -3px hsl(222 47% 11% / 0.1), 0 4px 6px -4px hsl(222 47% 11% / 0.1);
+    --shadow-card: 0 1px 3px 0 hsl(222 47% 11% / 0.1), 0 1px 2px -1px hsl(222 47% 11% / 0.1);
+  }
+
+  .dark {
+    --background: 222 47% 8%;
+    --foreground: 220 14% 96%;
+
+    --card: 222 47% 11%;
+    --card-foreground: 220 14% 96%;
+
+    --popover: 222 47% 11%;
+    --popover-foreground: 220 14% 96%;
+
+    --primary: var(--cenion-violet);
+    --primary-foreground: 0 0% 100%;
+
+    --secondary: 222 47% 18%;
+    --secondary-foreground: 220 14% 96%;
+
+    --muted: 222 47% 18%;
+    --muted-foreground: 220 9% 60%;
+
+    --accent: 222 47% 18%;
+    --accent-foreground: 220 14% 96%;
+
+    --destructive: 0 62% 50%;
+    --destructive-foreground: 0 0% 100%;
+
+    --border: 222 47% 18%;
+    --input: 222 47% 18%;
+    --ring: var(--cenion-violet);
+
+    --sidebar-background: var(--cenion-dark-violet);
+    --sidebar-foreground: 220 14% 96%;
+    --sidebar-primary: var(--cenion-violet);
+    --sidebar-primary-foreground: 0 0% 100%;
+    --sidebar-accent: 254 29% 19%;
+    --sidebar-accent-foreground: 220 14% 96%;
+    --sidebar-border: 257 30% 16%;
+    --sidebar-ring: var(--cenion-violet);
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+
+  body {
+    @apply bg-background text-foreground font-sans antialiased;
+    font-family: 'Inter', system-ui, sans-serif;
+  }
+
+  h1, h2, h3, h4, h5, h6 {
+    @apply font-semibold tracking-tight;
+  }
+}
+
+@layer components {
+  .status-badge {
+    @apply inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium;
+  }
+
+  .status-open {
+    background-color: hsl(var(--status-open) / 0.1);
+    color: hsl(var(--status-open));
+  }
+
+  .status-attributed {
+    background-color: hsl(var(--status-open) / 0.1);
+    color: hsl(var(--status-open));
+  }
+
+  .status-analysis {
+    background-color: hsl(var(--status-analysis) / 0.1);
+    color: hsl(var(--status-analysis));
+  }
+
+  .status-waiting {
+    background-color: hsl(var(--status-waiting) / 0.1);
+    color: hsl(var(--status-waiting));
+  }
+
+  .status-approved {
+    background-color: hsl(var(--status-approved) / 0.1);
+    color: hsl(var(--status-approved));
+  }
+
+  .status-execution {
+    background-color: hsl(var(--status-execution) / 0.1);
+    color: hsl(var(--status-execution));
+  }
+
+  .status-finished {
+    background-color: hsl(var(--status-finished) / 0.1);
+    color: hsl(var(--status-finished));
+  }
+
+  .status-dispatched {
+    background-color: hsl(var(--status-dispatched) / 0.1);
+    color: hsl(var(--status-dispatched));
+  }
+
+  .status-invoiced {
+    background-color: hsl(var(--status-invoiced) / 0.1);
+    color: hsl(var(--status-invoiced));
+  }
+
+  .priority-low {
+    background-color: hsl(var(--priority-low) / 0.1);
+    color: hsl(var(--priority-low));
+  }
+
+  .priority-medium {
+    background-color: hsl(var(--priority-medium) / 0.1);
+    color: hsl(var(--priority-medium));
+  }
+
+  .priority-high {
+    background-color: hsl(var(--priority-high) / 0.1);
+    color: hsl(var(--priority-high));
+  }
+
+  .priority-critical {
+    background-color: hsl(var(--priority-critical) / 0.1);
+    color: hsl(var(--priority-critical));
+  }
+
+  .card-hover {
+    @apply transition-all duration-200 hover:shadow-lg hover:-translate-y-0.5;
+  }
+
+  .sidebar-link {
+    @apply flex items-center gap-3 px-3 py-2 rounded-lg text-sidebar-foreground/70 hover:text-sidebar-foreground hover:bg-sidebar-accent transition-colors;
+  }
+
+  .sidebar-link-active {
+    @apply bg-sidebar-accent text-sidebar-foreground;
+  }
+
+  .kanban-column {
+    @apply bg-muted/50 rounded-xl p-4 min-w-[280px] max-w-[280px] sm:min-w-[320px] sm:max-w-[320px];
+  }
+
+  .kanban-card {
+    @apply bg-card rounded-lg p-4 shadow-sm border border-border hover:shadow-md transition-shadow cursor-pointer;
+  }
+
+  .data-table-row {
+    @apply hover:bg-muted/50 transition-colors;
+  }
+
+  .glass-card {
+    @apply bg-card/80 backdrop-blur-sm border border-border/50 shadow-card;
+  }
+}
+
+@layer utilities {
+  .animate-fade-in {
+    animation: fadeIn 0.3s ease-out;
+  }
+
+  .animate-slide-in {
+    animation: slideIn 0.3s ease-out;
+  }
+
+  .animate-scale-in {
+    animation: scaleIn 0.2s ease-out;
+  }
+
+  @keyframes fadeIn {
+    from {
+      opacity: 0;
+    }
+    to {
+      opacity: 1;
+    }
+  }
+
+  @keyframes slideIn {
+    from {
+      opacity: 0;
+      transform: translateY(-10px);
+    }
+    to {
+      opacity: 1;
+      transform: translateY(0);
+    }
+  }
+
+  @keyframes scaleIn {
+    from {
+      opacity: 0;
+      transform: scale(0.95);
+    }
+    to {
+      opacity: 1;
+      transform: scale(1);
+    }
+  }
+}
