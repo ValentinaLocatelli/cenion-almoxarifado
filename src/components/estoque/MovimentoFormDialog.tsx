@@ -16,7 +16,8 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
-import { useEstoque } from '@/contexts/EstoqueContext';
+import { useEstoque } from '@/contexts/useEstoque';
+import { emptyMovimento } from '@/components/estoque/emptyMovimento';
 
 export interface MovimentoValues {
   produto: string;
@@ -26,15 +27,6 @@ export interface MovimentoValues {
   tecnico: string;
   quantidade: string;
 }
-
-export const emptyMovimento: MovimentoValues = {
-  produto: '',
-  modelo: '',
-  fornecedor: '',
-  local: '',
-  tecnico: '',
-  quantidade: '',
-};
 
 interface MovimentoFormDialogProps {
   kind: 'entrada' | 'saida';

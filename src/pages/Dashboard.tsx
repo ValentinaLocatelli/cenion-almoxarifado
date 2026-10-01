@@ -1,8 +1,10 @@
-import { useMemo } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { AlertTriangle, ArrowDownToLine, ArrowUpToLine, Package } from 'lucide-react';
 import { PageHeader } from '@/components/common/PageHeader';
 import { Badge } from '@/components/ui/badge';
+import { useAuth } from '@/contexts/AuthContext';
+import { supabase } from '@/lib/supabase';
 import {
   Table,
   TableBody,
@@ -11,14 +13,54 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table';
-import { useEstoque } from '@/contexts/EstoqueContext';
+import { useEstoque } from '@/contexts/useEstoque';
 import { formatDateTime } from '@/lib/formatDate';
 
 const MOVIMENTOS_VISIVEIS = 15;
 
+interface PartRequestRow {
+  id: string;
+  order_type: 'VC' | 'OS';
+  order_code: string;
+  part_description: string;
+  quantity: number;
+  requested_at: string;
+}
+
 export default function Dashboard() {
   const navigate = useNavigate();
+  const { user } = useAuth();
   const { entradas, saidas, itens } = useEstoque();
+  const [partRequests, setPartRequests] = useState<PartRequestRow[]>([]);
+  const [isLoadingRequests, setIsLoadingRequests] = useState(false);
+  const canViewPartRequests = user?.role === 'ADMIN' || user?.role === 'SUPERVISOR';
+
+  useEffect(() => {
+    if (!canViewPartRequests) return;
+
+    let isCurrent = true;
+    setIsLoadingRequests(true);
+    void supabase
+      .from('part_requests')
+      .select('id,order_type,order_code,part_description,quantity,requested_at')
+      .eq('received', false)
+      .order('requested_at', { ascending: false })
+      .limit(100)
+      .then(({ data, error }) => {
+        if (!isCurrent) return;
+        if (error) {
+          console.error('Falha ao carregar solicitações de peças:', error);
+          setPartRequests([]);
+        } else {
+          setPartRequests((data ?? []) as PartRequestRow[]);
+        }
+        setIsLoadingRequests(false);
+      });
+
+    return () => {
+      isCurrent = false;
+    };
+  }, [canViewPartRequests]);
 
   const cards = [
     { title: 'Entrada', description: `${entradas.length} registros`, icon: ArrowDownToLine, href: '/entrada' },
@@ -88,6 +130,53 @@ export default function Dashboard() {
           );
         })}
       </div>
+
+      {canViewPartRequests && (
+        <section className="space-y-3">
+          <div className="flex items-center gap-2">
+            <h2 className="text-lg font-semibold">Solicitações de peças pendentes</h2>
+            {partRequests.length > 0 && <Badge>{partRequests.length}</Badge>}
+          </div>
+          <div className="overflow-x-auto rounded-xl border border-border bg-card shadow-sm">
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>Tipo</TableHead>
+                  <TableHead>Identificação</TableHead>
+                  <TableHead>Peça</TableHead>
+                  <TableHead>Quantidade</TableHead>
+                  <TableHead>Atualização</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {isLoadingRequests ? (
+                  <TableRow>
+                    <TableCell colSpan={5} className="py-8 text-center text-muted-foreground">
+                      Carregando solicitações...
+                    </TableCell>
+                  </TableRow>
+                ) : partRequests.length === 0 ? (
+                  <TableRow>
+                    <TableCell colSpan={5} className="py-8 text-center text-muted-foreground">
+                      Nenhuma solicitação pendente.
+                    </TableCell>
+                  </TableRow>
+                ) : (
+                  partRequests.map((request) => (
+                    <TableRow key={request.id}>
+                      <TableCell><Badge variant="outline">{request.order_type}</Badge></TableCell>
+                      <TableCell className="font-medium">{request.order_code}</TableCell>
+                      <TableCell>{request.part_description}</TableCell>
+                      <TableCell>{request.quantity}</TableCell>
+                      <TableCell>{formatDateTime(request.requested_at)}</TableCell>
+                    </TableRow>
+                  ))
+                )}
+              </TableBody>
+            </Table>
+          </div>
+        </section>
+      )}
 
       <section className="space-y-3">
         <div className="flex items-center gap-2">

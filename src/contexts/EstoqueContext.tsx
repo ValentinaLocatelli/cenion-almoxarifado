@@ -1,7 +1,5 @@
 import {
-  createContext,
   useCallback,
-  useContext,
   useEffect,
   useMemo,
   useState,
@@ -15,20 +13,21 @@ import type {
   Saida,
   SaidaInput,
 } from '@/types/estoque';
+import { EstoqueContext } from '@/contexts/EstoqueContextStore';
 
-interface EstoqueState {
+export interface EstoqueState {
   itens: Item[];
   entradas: Entrada[];
   saidas: Saida[];
 }
 
-interface EstoqueContextType extends EstoqueState {
+export interface EstoqueContextType extends EstoqueState {
   addEntrada: (input: EntradaInput) => void;
   updateEntrada: (id: string, input: EntradaInput) => void;
   removeEntrada: (id: string) => void;
   setEntradaObservacao: (id: string, observacao: string) => void;
-  addSaida: (input: SaidaInput) => void;
-  updateSaida: (id: string, input: SaidaInput) => void;
+  addSaida: (input: SaidaInput) => string | null;
+  updateSaida: (id: string, input: SaidaInput) => string | null;
   removeSaida: (id: string) => void;
   setSaidaObservacao: (id: string, observacao: string) => void;
   addItem: (input: ItemInput) => void;
@@ -39,14 +38,26 @@ interface EstoqueContextType extends EstoqueState {
 const STORAGE_KEY = 'cenion-almoxa-estoque-v1';
 const EMPTY: EstoqueState = { itens: [], entradas: [], saidas: [] };
 
-const EstoqueContext = createContext<EstoqueContextType | undefined>(undefined);
-
 const uid = () =>
   typeof crypto !== 'undefined' && 'randomUUID' in crypto
     ? crypto.randomUUID()
     : `${Date.now()}-${Math.random().toString(16).slice(2)}`;
 
 const norm = (value: string) => value.trim().toLowerCase().replace(/\s+/g, ' ');
+
+function saldoDoItem(state: EstoqueState, itemId: string): number {
+  const entradas = state.entradas
+    .filter((entrada) => entrada.itemId === itemId)
+    .reduce((total, entrada) => total + entrada.quantidade, 0);
+  const saidas = state.saidas
+    .filter((saida) => saida.itemId === itemId)
+    .reduce((total, saida) => total + saida.quantidade, 0);
+  return entradas - saidas;
+}
+
+function mensagemSaldoInsuficiente(saldo: number): string {
+  return `Quantidade insuficiente em estoque. Saldo disponível: ${saldo} unidades.`;
+}
 
 const load = (): EstoqueState => {
   try {
@@ -177,7 +188,13 @@ export function EstoqueProvider({ children }: { children: ReactNode }) {
     }));
   }, []);
 
-  const addSaida = useCallback((input: SaidaInput) => {
+  const addSaida = useCallback((input: SaidaInput): string | null => {
+    const existente = state.itens.find(
+      (item) => norm(item.produto) === norm(input.produto) && norm(item.modelo) === norm(input.modelo),
+    );
+    const saldo = existente ? saldoDoItem(state, existente.id) : 0;
+    if (input.quantidade > saldo) return mensagemSaldoInsuficiente(saldo);
+
     setState((s) => {
       const now = new Date().toISOString();
       const { itens, id } = findOrCreateItem(s.itens, input.produto, input.modelo, now);
@@ -192,15 +209,26 @@ export function EstoqueProvider({ children }: { children: ReactNode }) {
       };
       return { ...s, itens, saidas: [...s.saidas, saida] };
     });
-  }, []);
+    return null;
+  }, [state]);
 
-  const updateSaida = useCallback((id: string, input: SaidaInput) => {
+  const updateSaida = useCallback((id: string, input: SaidaInput): string | null => {
+    const old = state.saidas.find((e) => e.id === id);
+    if (!old) return null;
+    const existente = state.itens.find(
+      (item) => norm(item.produto) === norm(input.produto) && norm(item.modelo) === norm(input.modelo),
+    );
+    const itemDestinoId = existente?.id;
+    const saldo = itemDestinoId ? saldoDoItem(state, itemDestinoId) : 0;
+    const saldoDisponivel = itemDestinoId === old.itemId ? saldo + old.quantidade : saldo;
+    if (input.quantidade > saldoDisponivel) return mensagemSaldoInsuficiente(saldoDisponivel);
+
     setState((s) => {
-      const old = s.saidas.find((e) => e.id === id);
-      if (!old) return s;
+      const oldSaida = s.saidas.find((e) => e.id === id);
+      if (!oldSaida) return s;
       const now = new Date().toISOString();
       const { itens, id: itemId } = findOrCreateItem(s.itens, input.produto, input.modelo, now);
-      const delta = itemId === old.itemId ? input.quantidade - old.quantidade : 0;
+      const delta = itemId === oldSaida.itemId ? input.quantidade - oldSaida.quantidade : 0;
       return {
         ...s,
         itens,
@@ -218,7 +246,8 @@ export function EstoqueProvider({ children }: { children: ReactNode }) {
         entradas: mirrorDelta(s.entradas, itemId, delta, now),
       };
     });
-  }, []);
+    return null;
+  }, [state]);
 
   const removeSaida = useCallback((id: string) => {
     setState((s) => ({ ...s, saidas: s.saidas.filter((e) => e.id !== id) }));
@@ -307,10 +336,4 @@ export function EstoqueProvider({ children }: { children: ReactNode }) {
   );
 
   return <EstoqueContext.Provider value={value}>{children}</EstoqueContext.Provider>;
-}
-
-export function useEstoque() {
-  const ctx = useContext(EstoqueContext);
-  if (!ctx) throw new Error('useEstoque deve ser usado dentro de EstoqueProvider');
-  return ctx;
 }

@@ -20,7 +20,7 @@ import {
   TableRow,
 } from '@/components/ui/table';
 import { RowActions } from '@/components/estoque/RowActions';
-import { useEstoque } from '@/contexts/EstoqueContext';
+import { useEstoque } from '@/contexts/useEstoque';
 import { firstName, normalizeText } from '@/lib/formatDate';
 import type { Item } from '@/types/estoque';
 

@@ -16,8 +16,9 @@ import {
   MovimentoFormDialog,
   type MovimentoValues,
 } from '@/components/estoque/MovimentoFormDialog';
-import { useEstoque } from '@/contexts/EstoqueContext';
+import { useEstoque } from '@/contexts/useEstoque';
 import { formatDate, formatDateTime } from '@/lib/formatDate';
+import { toast } from 'sonner';
 
 export default function Saida() {
   const { saidas, itens, addSaida, updateSaida, removeSaida, setSaidaObservacao } = useEstoque();
@@ -125,8 +126,8 @@ export default function Saida() {
             tecnico: values.tecnico,
             quantidade: Number(values.quantidade),
           };
-          if (editingId) updateSaida(editingId, payload);
-          else addSaida(payload);
+          const erro = editingId ? updateSaida(editingId, payload) : addSaida(payload);
+          if (erro) toast.error(erro);
         }}
       />
 

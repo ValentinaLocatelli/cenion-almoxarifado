@@ -16,7 +16,7 @@ import {
   MovimentoFormDialog,
   type MovimentoValues,
 } from '@/components/estoque/MovimentoFormDialog';
-import { useEstoque } from '@/contexts/EstoqueContext';
+import { useEstoque } from '@/contexts/useEstoque';
 import { formatDate, formatDateTime } from '@/lib/formatDate';
 
 export default function Entrada() {
