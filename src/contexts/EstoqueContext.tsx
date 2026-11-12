@@ -2,18 +2,31 @@ import {
   useCallback,
   useEffect,
   useMemo,
+  useRef,
   useState,
   type ReactNode,
 } from 'react';
 import type {
   Entrada,
   EntradaInput,
+  EstoqueResult,
   Item,
   ItemInput,
   Saida,
   SaidaInput,
 } from '@/types/estoque';
 import { EstoqueContext } from '@/contexts/EstoqueContextStore';
+import { useActiveUnit } from '@/contexts/ActiveUnitContext';
+import { useAuth } from '@/contexts/AuthContext';
+import { supabase } from '@/lib/supabase';
+import { fetchAllPages } from '@/lib/fetchAllPages';
+
+/**
+ * Estoque do almoxarifado no banco (estoque_itens + estoque_movimentos, supabase/add_estoque.sql no cenion-os-management).
+ * Até 12/11/2026 ficava só no localStorage de cada navegador; agora todos os computadores veem o mesmo saldo, por
+ * unidade, e o banco guarda quem lançou. O saldo nunca fica negativo: o banco recusa a gravação e a mensagem dele é
+ * mostrada ao usuário. Editar uma entrada ou saída muda só aquele registro.
+ */
 
 export interface EstoqueState {
   itens: Item[];
@@ -22,313 +35,351 @@ export interface EstoqueState {
 }
 
 export interface EstoqueContextType extends EstoqueState {
-  addEntrada: (input: EntradaInput) => void;
-  updateEntrada: (id: string, input: EntradaInput) => void;
-  removeEntrada: (id: string) => void;
-  setEntradaObservacao: (id: string, observacao: string) => void;
-  addSaida: (input: SaidaInput) => string | null;
-  updateSaida: (id: string, input: SaidaInput) => string | null;
-  removeSaida: (id: string) => void;
-  setSaidaObservacao: (id: string, observacao: string) => void;
-  addItem: (input: ItemInput) => void;
-  updateItem: (id: string, input: ItemInput) => void;
-  removeItem: (id: string) => void;
+  isLoading: boolean;
+  /** Falha ao carregar (sem conexão, sem permissão...). */
+  loadError: string | null;
+  reload: () => Promise<void>;
+  addEntrada: (input: EntradaInput) => Promise<EstoqueResult>;
+  updateEntrada: (id: string, input: EntradaInput) => Promise<EstoqueResult>;
+  removeEntrada: (id: string) => Promise<EstoqueResult>;
+  setEntradaObservacao: (id: string, observacao: string) => Promise<EstoqueResult>;
+  addSaida: (input: SaidaInput) => Promise<EstoqueResult>;
+  updateSaida: (id: string, input: SaidaInput) => Promise<EstoqueResult>;
+  removeSaida: (id: string) => Promise<EstoqueResult>;
+  setSaidaObservacao: (id: string, observacao: string) => Promise<EstoqueResult>;
+  addItem: (input: ItemInput) => Promise<EstoqueResult>;
+  updateItem: (id: string, input: ItemInput) => Promise<EstoqueResult>;
+  removeItem: (id: string) => Promise<EstoqueResult>;
 }
 
-const STORAGE_KEY = 'cenion-almoxa-estoque-v1';
 const EMPTY: EstoqueState = { itens: [], entradas: [], saidas: [] };
 
-const uid = () =>
-  typeof crypto !== 'undefined' && 'randomUUID' in crypto
-    ? crypto.randomUUID()
-    : `${Date.now()}-${Math.random().toString(16).slice(2)}`;
-
+/** Mesma regra de comparação do índice único do banco (sem maiúsculas e sem espaços nas pontas). */
 const norm = (value: string) => value.trim().toLowerCase().replace(/\s+/g, ' ');
 
-function saldoDoItem(state: EstoqueState, itemId: string): number {
-  const entradas = state.entradas
-    .filter((entrada) => entrada.itemId === itemId)
-    .reduce((total, entrada) => total + entrada.quantidade, 0);
-  const saidas = state.saidas
-    .filter((saida) => saida.itemId === itemId)
-    .reduce((total, saida) => total + saida.quantidade, 0);
-  return entradas - saidas;
-}
+const text = (value: unknown) => (typeof value === 'string' ? value : '');
 
-function mensagemSaldoInsuficiente(saldo: number): string {
-  return `Quantidade insuficiente em estoque. Saldo disponível: ${saldo} unidades.`;
-}
-
-const load = (): EstoqueState => {
-  try {
-    const raw = localStorage.getItem(STORAGE_KEY);
-    if (!raw) return EMPTY;
-    const parsed = JSON.parse(raw) as Partial<EstoqueState>;
-    return {
-      itens: parsed.itens ?? [],
-      entradas: parsed.entradas ?? [],
-      saidas: parsed.saidas ?? [],
-    };
-  } catch {
-    return EMPTY;
-  }
-};
-
-/** Acha o item pelo produto + modelo ou cria um novo (histórico de itens). */
-function findOrCreateItem(
-  itens: Item[],
-  produto: string,
-  modelo: string,
-  now: string,
-): { itens: Item[]; id: string } {
-  const found = itens.find(
-    (item) => norm(item.produto) === norm(produto) && norm(item.modelo) === norm(modelo),
-  );
-  if (found) return { itens, id: found.id };
-  const created: Item = {
-    id: uid(),
-    produto: produto.trim(),
-    modelo: modelo.trim(),
-    createdAt: now,
-    updatedAt: now,
+function mapItem(row: Record<string, unknown>): Item {
+  return {
+    id: String(row.id),
+    unitId: String(row.unit_id ?? ''),
+    produto: text(row.produto),
+    modelo: text(row.modelo),
+    quantidadeMinima: typeof row.quantidade_minima === 'number' ? row.quantidade_minima : undefined,
+    createdAt: text(row.created_at),
+    updatedAt: text(row.updated_at),
   };
-  return { itens: [...itens, created], id: created.id };
 }
 
-/**
- * Aplica a variação de quantidade (delta) no último registro do outro lado
- * para o mesmo item. Nunca deixa a quantidade ficar negativa.
- */
-function mirrorDelta<T extends { itemId: string; quantidade: number; atualizacao: string }>(
-  rows: T[],
-  itemId: string,
-  delta: number,
-  now: string,
-): T[] {
-  if (delta === 0) return rows;
-  let index = -1;
-  for (let i = rows.length - 1; i >= 0; i -= 1) {
-    if (rows[i].itemId === itemId) {
-      index = i;
-      break;
-    }
+/** Mensagem para o usuário a partir do erro do Supabase (as do saldo já vêm em português do banco). */
+export function estoqueErrorMessage(error: unknown, fallback = 'Não foi possível gravar no estoque.'): string {
+  const record = (error && typeof error === 'object' ? error : {}) as { code?: string; message?: string };
+  const message = record.message ?? '';
+  if (record.code === '23505') return 'Já existe um item com esse produto e modelo nesta unidade.';
+  if (message.includes('estoque_movimentos_entrada_local_check')) return 'Informe o local da entrada.';
+  if (message.includes('estoque_movimentos_saida_tecnico_check')) return 'Informe o técnico da saída.';
+  if (record.code === '42501') {
+    return 'Sem permissão: o almoxarifado é só para administradores e supervisores da unidade.';
   }
-  if (index === -1) return rows;
-  return rows.map((row, i) =>
-    i === index
-      ? { ...row, quantidade: Math.max(0, row.quantidade + delta), atualizacao: now }
-      : row,
-  );
+  if (record.code === '23514' && message) return message;
+  // Tabela ausente: 42P01 no Postgres, PGRST205 / "schema cache" no PostgREST.
+  if (record.code === '42P01' || record.code === 'PGRST205' || /schema cache/i.test(message)) {
+    return 'As tabelas do estoque ainda não existem neste banco. Rode supabase/add_estoque.sql no Supabase.';
+  }
+  return message || fallback;
 }
 
 export function EstoqueProvider({ children }: { children: ReactNode }) {
-  const [state, setState] = useState<EstoqueState>(load);
+  const { isAuthenticated } = useAuth();
+  const { activeUnitId } = useActiveUnit();
+  const [state, setState] = useState<EstoqueState>(EMPTY);
+  const [isLoading, setIsLoading] = useState(false);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const loadVersion = useRef(0);
+
+  const reload = useCallback(async () => {
+    const version = ++loadVersion.current;
+    if (!isAuthenticated || !activeUnitId) {
+      setState(EMPTY);
+      setLoadError(isAuthenticated ? 'Nenhuma unidade selecionada.' : null);
+      return;
+    }
+    setIsLoading(true);
+    try {
+      const [itemRows, movimentoRows] = await Promise.all([
+        fetchAllPages((from, to) =>
+          supabase
+            .from('estoque_itens')
+            .select('*')
+            .eq('unit_id', activeUnitId)
+            .order('created_at', { ascending: true })
+            .order('id', { ascending: true })
+            .range(from, to),
+        ),
+        fetchAllPages((from, to) =>
+          supabase
+            .from('estoque_movimentos')
+            .select('*')
+            .eq('unit_id', activeUnitId)
+            .order('data_movimento', { ascending: true })
+            .order('id', { ascending: true })
+            .range(from, to),
+        ),
+      ]);
+      if (version !== loadVersion.current) return; // resposta velha (outra unidade, outro recarregamento)
+      const entradas: Entrada[] = [];
+      const saidas: Saida[] = [];
+      movimentoRows.forEach((row) => {
+        const base = {
+          id: String(row.id),
+          itemId: String(row.item_id),
+          quantidade: Number(row.quantidade ?? 0),
+          atualizacao: text(row.updated_at),
+          observacao: text(row.observacao),
+          createdByName: text(row.created_by_name) || undefined,
+        };
+        if (row.tipo === 'SAIDA') {
+          saidas.push({ ...base, tecnico: text(row.tecnico), dataSaida: text(row.data_movimento) });
+        } else {
+          entradas.push({ ...base, fornecedor: text(row.fornecedor), local: text(row.local), dataEntrada: text(row.data_movimento) });
+        }
+      });
+      setState({ itens: itemRows.map(mapItem), entradas, saidas });
+      setLoadError(null);
+    } catch (error) {
+      if (version !== loadVersion.current) return;
+      console.error('Falha ao carregar o estoque:', error);
+      setLoadError(estoqueErrorMessage(error, 'Não foi possível carregar o estoque.'));
+    } finally {
+      if (version === loadVersion.current) setIsLoading(false);
+    }
+  }, [activeUnitId, isAuthenticated]);
 
   useEffect(() => {
-    try {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
-    } catch {
-      /* armazenamento indisponível: segue só em memória */
-    }
-  }, [state]);
+    void reload();
+  }, [reload]);
 
-  const addEntrada = useCallback((input: EntradaInput) => {
-    setState((s) => {
-      const now = new Date().toISOString();
-      const { itens, id } = findOrCreateItem(s.itens, input.produto, input.modelo, now);
-      const entrada: Entrada = {
-        id: uid(),
-        itemId: id,
-        fornecedor: input.fornecedor.trim(),
-        local: input.local.trim(),
-        quantidade: input.quantidade,
-        dataEntrada: now,
-        atualizacao: now,
-        observacao: '',
-      };
-      return { ...s, itens, entradas: [...s.entradas, entrada] };
-    });
-  }, []);
+  // Outro computador lançou ou editou: recarrega (com uma pequena espera para juntar várias mudanças seguidas).
+  useEffect(() => {
+    if (!isAuthenticated || !activeUnitId) return;
+    let timer: number | undefined;
+    const schedule = () => {
+      window.clearTimeout(timer);
+      timer = window.setTimeout(() => void reload(), 400);
+    };
+    const channel = supabase
+      .channel(`estoque-${activeUnitId}`)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'estoque_itens', filter: `unit_id=eq.${activeUnitId}` }, schedule)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'estoque_movimentos', filter: `unit_id=eq.${activeUnitId}` }, schedule)
+      .subscribe();
+    return () => {
+      window.clearTimeout(timer);
+      void supabase.removeChannel(channel);
+    };
+  }, [activeUnitId, isAuthenticated, reload]);
 
-  const updateEntrada = useCallback((id: string, input: EntradaInput) => {
-    setState((s) => {
-      const old = s.entradas.find((e) => e.id === id);
-      if (!old) return s;
-      const now = new Date().toISOString();
-      const { itens, id: itemId } = findOrCreateItem(s.itens, input.produto, input.modelo, now);
-      const delta = itemId === old.itemId ? input.quantidade - old.quantidade : 0;
-      return {
-        ...s,
-        itens,
-        entradas: s.entradas.map((e) =>
-          e.id === id
-            ? {
-                ...e,
-                itemId,
-                fornecedor: input.fornecedor.trim(),
-                local: input.local.trim(),
-                quantidade: input.quantidade,
-                atualizacao: now,
-              }
-            : e,
-        ),
-        saidas: mirrorDelta(s.saidas, itemId, delta, now),
-      };
-    });
-  }, []);
+  /** Executa a gravação e recarrega; devolve a mensagem de erro (ou null). */
+  const run = useCallback(
+    async (action: () => Promise<{ error: unknown } | void>, fallback?: string): Promise<EstoqueResult> => {
+      try {
+        const result = await action();
+        if (result && result.error) return estoqueErrorMessage(result.error, fallback);
+        await reload();
+        return null;
+      } catch (error) {
+        return estoqueErrorMessage(error, fallback);
+      }
+    },
+    [reload],
+  );
 
-  const removeEntrada = useCallback((id: string) => {
-    setState((s) => ({ ...s, entradas: s.entradas.filter((e) => e.id !== id) }));
-  }, []);
+  const findItem = useCallback(
+    (produto: string, modelo: string) =>
+      state.itens.find((item) => norm(item.produto) === norm(produto) && norm(item.modelo) === norm(modelo)),
+    [state.itens],
+  );
 
-  const setEntradaObservacao = useCallback((id: string, observacao: string) => {
-    setState((s) => ({
-      ...s,
-      entradas: s.entradas.map((e) => (e.id === id ? { ...e, observacao } : e)),
-    }));
-  }, []);
+  /** Acha o item pelo produto + modelo ou cria um novo na unidade ativa (histórico de itens). */
+  const findOrCreateItemId = useCallback(
+    async (produto: string, modelo: string): Promise<string> => {
+      const existing = findItem(produto, modelo);
+      if (existing) return existing.id;
+      const { data, error } = await supabase
+        .from('estoque_itens')
+        .insert({ unit_id: activeUnitId, produto: produto.trim(), modelo: modelo.trim() })
+        .select('id')
+        .single();
+      if (error) {
+        // Outro computador criou o mesmo item agora há pouco: usa o dele.
+        if ((error as { code?: string }).code === '23505') {
+          const { data: found, error: findError } = await supabase
+            .from('estoque_itens')
+            .select('id, produto, modelo')
+            .eq('unit_id', activeUnitId);
+          if (findError) throw findError;
+          const match = (found ?? []).find(
+            (row) => norm(String(row.produto)) === norm(produto) && norm(String(row.modelo)) === norm(modelo),
+          );
+          if (match) return String(match.id);
+        }
+        throw error;
+      }
+      return String((data as { id: string }).id);
+    },
+    [activeUnitId, findItem],
+  );
 
-  const addSaida = useCallback((input: SaidaInput): string | null => {
-    const existente = state.itens.find(
-      (item) => norm(item.produto) === norm(input.produto) && norm(item.modelo) === norm(input.modelo),
-    );
-    const saldo = existente ? saldoDoItem(state, existente.id) : 0;
-    if (input.quantidade > saldo) return mensagemSaldoInsuficiente(saldo);
+  const addEntrada = useCallback(
+    (input: EntradaInput) =>
+      run(async () => {
+        const itemId = await findOrCreateItemId(input.produto, input.modelo);
+        return supabase.from('estoque_movimentos').insert({
+          unit_id: activeUnitId,
+          item_id: itemId,
+          tipo: 'ENTRADA',
+          quantidade: input.quantidade,
+          fornecedor: input.fornecedor.trim() || null,
+          local: input.local.trim(),
+        });
+      }),
+    [activeUnitId, findOrCreateItemId, run],
+  );
 
-    setState((s) => {
-      const now = new Date().toISOString();
-      const { itens, id } = findOrCreateItem(s.itens, input.produto, input.modelo, now);
-      const saida: Saida = {
-        id: uid(),
-        itemId: id,
-        tecnico: input.tecnico.trim(),
-        quantidade: input.quantidade,
-        dataSaida: now,
-        atualizacao: now,
-        observacao: '',
-      };
-      return { ...s, itens, saidas: [...s.saidas, saida] };
-    });
-    return null;
-  }, [state]);
+  const updateEntrada = useCallback(
+    (id: string, input: EntradaInput) =>
+      run(async () => {
+        const itemId = await findOrCreateItemId(input.produto, input.modelo);
+        // Só esta entrada muda; o banco recusa se o saldo de algum item ficar negativo.
+        return supabase
+          .from('estoque_movimentos')
+          .update({
+            item_id: itemId,
+            quantidade: input.quantidade,
+            fornecedor: input.fornecedor.trim() || null,
+            local: input.local.trim(),
+          })
+          .eq('id', id);
+      }),
+    [findOrCreateItemId, run],
+  );
 
-  const updateSaida = useCallback((id: string, input: SaidaInput): string | null => {
-    const old = state.saidas.find((e) => e.id === id);
-    if (!old) return null;
-    const existente = state.itens.find(
-      (item) => norm(item.produto) === norm(input.produto) && norm(item.modelo) === norm(input.modelo),
-    );
-    const itemDestinoId = existente?.id;
-    const saldo = itemDestinoId ? saldoDoItem(state, itemDestinoId) : 0;
-    const saldoDisponivel = itemDestinoId === old.itemId ? saldo + old.quantidade : saldo;
-    if (input.quantidade > saldoDisponivel) return mensagemSaldoInsuficiente(saldoDisponivel);
+  const addSaida = useCallback(
+    (input: SaidaInput) => {
+      // Item que nunca entrou não tem saldo: nem cria o item.
+      if (!findItem(input.produto, input.modelo)) {
+        return Promise.resolve<EstoqueResult>('Quantidade insuficiente em estoque. Saldo disponível: 0 unidades.');
+      }
+      return run(async () => {
+        const itemId = await findOrCreateItemId(input.produto, input.modelo);
+        return supabase.from('estoque_movimentos').insert({
+          unit_id: activeUnitId,
+          item_id: itemId,
+          tipo: 'SAIDA',
+          quantidade: input.quantidade,
+          tecnico: input.tecnico.trim(),
+        });
+      });
+    },
+    [activeUnitId, findItem, findOrCreateItemId, run],
+  );
 
-    setState((s) => {
-      const oldSaida = s.saidas.find((e) => e.id === id);
-      if (!oldSaida) return s;
-      const now = new Date().toISOString();
-      const { itens, id: itemId } = findOrCreateItem(s.itens, input.produto, input.modelo, now);
-      const delta = itemId === oldSaida.itemId ? input.quantidade - oldSaida.quantidade : 0;
-      return {
-        ...s,
-        itens,
-        saidas: s.saidas.map((e) =>
-          e.id === id
-            ? {
-                ...e,
-                itemId,
-                tecnico: input.tecnico.trim(),
-                quantidade: input.quantidade,
-                atualizacao: now,
-              }
-            : e,
-        ),
-        entradas: mirrorDelta(s.entradas, itemId, delta, now),
-      };
-    });
-    return null;
-  }, [state]);
+  const updateSaida = useCallback(
+    (id: string, input: SaidaInput) => {
+      if (!findItem(input.produto, input.modelo)) {
+        return Promise.resolve<EstoqueResult>('Quantidade insuficiente em estoque. Saldo disponível: 0 unidades.');
+      }
+      return run(async () => {
+        const itemId = await findOrCreateItemId(input.produto, input.modelo);
+        return supabase
+          .from('estoque_movimentos')
+          .update({ item_id: itemId, quantidade: input.quantidade, tecnico: input.tecnico.trim() })
+          .eq('id', id);
+      });
+    },
+    [findItem, findOrCreateItemId, run],
+  );
 
-  const removeSaida = useCallback((id: string) => {
-    setState((s) => ({ ...s, saidas: s.saidas.filter((e) => e.id !== id) }));
-  }, []);
+  const removeMovimento = useCallback(
+    (id: string) => run(async () => supabase.from('estoque_movimentos').delete().eq('id', id)),
+    [run],
+  );
 
-  const setSaidaObservacao = useCallback((id: string, observacao: string) => {
-    setState((s) => ({
-      ...s,
-      saidas: s.saidas.map((e) => (e.id === id ? { ...e, observacao } : e)),
-    }));
-  }, []);
+  const setObservacao = useCallback(
+    (id: string, observacao: string) =>
+      run(async () => supabase.from('estoque_movimentos').update({ observacao: observacao.trim() }).eq('id', id)),
+    [run],
+  );
 
-  const addItem = useCallback((input: ItemInput) => {
-    setState((s) => {
-      const now = new Date().toISOString();
-      const { itens, id } = findOrCreateItem(s.itens, input.produto, input.modelo, now);
-      return {
-        ...s,
-        itens: itens.map((item) =>
-          item.id === id ? { ...item, quantidadeMinima: input.quantidadeMinima } : item,
-        ),
-      };
-    });
-  }, []);
+  const addItem = useCallback(
+    (input: ItemInput) =>
+      run(async () => {
+        const existing = findItem(input.produto, input.modelo);
+        if (existing) {
+          return supabase
+            .from('estoque_itens')
+            .update({ quantidade_minima: input.quantidadeMinima ?? null })
+            .eq('id', existing.id);
+        }
+        return supabase.from('estoque_itens').insert({
+          unit_id: activeUnitId,
+          produto: input.produto.trim(),
+          modelo: input.modelo.trim(),
+          quantidade_minima: input.quantidadeMinima ?? null,
+        });
+      }),
+    [activeUnitId, findItem, run],
+  );
 
-  const updateItem = useCallback((id: string, input: ItemInput) => {
-    setState((s) => {
-      const now = new Date().toISOString();
-      return {
-        ...s,
-        itens: s.itens.map((item) =>
-          item.id === id
-            ? {
-                ...item,
-                produto: input.produto.trim(),
-                modelo: input.modelo.trim(),
-                quantidadeMinima: input.quantidadeMinima,
-                updatedAt: now,
-              }
-            : item,
-        ),
-        // entradas e saídas apontam para o item, então o nome muda nas duas tabelas ao mesmo tempo
-        entradas: s.entradas.map((e) => (e.itemId === id ? { ...e, atualizacao: now } : e)),
-        saidas: s.saidas.map((e) => (e.itemId === id ? { ...e, atualizacao: now } : e)),
-      };
-    });
-  }, []);
+  const updateItem = useCallback(
+    (id: string, input: ItemInput) =>
+      run(async () =>
+        supabase
+          .from('estoque_itens')
+          .update({
+            produto: input.produto.trim(),
+            modelo: input.modelo.trim(),
+            quantidade_minima: input.quantidadeMinima ?? null,
+          })
+          .eq('id', id),
+      ),
+    [run],
+  );
 
-  const removeItem = useCallback((id: string) => {
-    setState((s) => ({
-      itens: s.itens.filter((item) => item.id !== id),
-      entradas: s.entradas.filter((e) => e.itemId !== id),
-      saidas: s.saidas.filter((e) => e.itemId !== id),
-    }));
-  }, []);
+  // Excluir o item apaga as entradas e saídas dele (cascata no banco; a tela pede confirmação).
+  const removeItem = useCallback(
+    (id: string) => run(async () => supabase.from('estoque_itens').delete().eq('id', id)),
+    [run],
+  );
 
   const value = useMemo<EstoqueContextType>(
     () => ({
       ...state,
+      isLoading,
+      loadError,
+      reload,
       addEntrada,
       updateEntrada,
-      removeEntrada,
-      setEntradaObservacao,
+      removeEntrada: removeMovimento,
+      setEntradaObservacao: setObservacao,
       addSaida,
       updateSaida,
-      removeSaida,
-      setSaidaObservacao,
+      removeSaida: removeMovimento,
+      setSaidaObservacao: setObservacao,
       addItem,
       updateItem,
       removeItem,
     }),
     [
       state,
+      isLoading,
+      loadError,
+      reload,
       addEntrada,
       updateEntrada,
-      removeEntrada,
-      setEntradaObservacao,
+      removeMovimento,
+      setObservacao,
       addSaida,
       updateSaida,
-      removeSaida,
-      setSaidaObservacao,
       addItem,
       updateItem,
       removeItem,

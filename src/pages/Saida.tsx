@@ -19,6 +19,7 @@ import {
 import { useEstoque } from '@/contexts/useEstoque';
 import { formatDate, formatDateTime } from '@/lib/formatDate';
 import { toast } from 'sonner';
+import { EstoqueStatus } from '@/components/estoque/EstoqueStatus';
 
 export default function Saida() {
   const { saidas, itens, addSaida, updateSaida, removeSaida, setSaidaObservacao } = useEstoque();
@@ -59,6 +60,8 @@ export default function Saida() {
         </Button>
       </PageHeader>
 
+      <EstoqueStatus />
+
       <div className="overflow-x-auto rounded-xl border border-border bg-card shadow-sm">
         <Table>
           <TableHeader>
@@ -86,6 +89,7 @@ export default function Saida() {
                     <div className="font-medium">{item?.produto ?? '—'}</div>
                     <div className="text-sm text-muted-foreground">
                       {item?.modelo} · Técnico: {saida.tecnico}
+                      {saida.createdByName && ` · Lançado por ${saida.createdByName}`}
                     </div>
                     {saida.observacao && (
                       <div className="mt-1 text-sm italic text-muted-foreground">
@@ -103,7 +107,10 @@ export default function Saida() {
                         setFormOpen(true);
                       }}
                       onObservation={() => setObsId(saida.id)}
-                      onDelete={() => removeSaida(saida.id)}
+                      onDelete={async () => {
+                        const erro = await removeSaida(saida.id);
+                        if (erro) toast.error(erro);
+                      }}
                     />
                   </TableCell>
                 </TableRow>
@@ -119,15 +126,15 @@ export default function Saida() {
         open={formOpen}
         onOpenChange={setFormOpen}
         initial={initial}
-        onSubmit={(values) => {
+        onSubmit={async (values) => {
           const payload = {
             produto: values.produto,
             modelo: values.modelo,
             tecnico: values.tecnico,
             quantidade: Number(values.quantidade),
           };
-          const erro = editingId ? updateSaida(editingId, payload) : addSaida(payload);
-          if (erro) toast.error(erro);
+          // A mensagem de erro (ex.: saldo insuficiente) aparece no próprio formulário, que fica aberto.
+          return editingId ? updateSaida(editingId, payload) : addSaida(payload);
         }}
       />
 
@@ -136,7 +143,7 @@ export default function Saida() {
         open={Boolean(obsId)}
         onOpenChange={(open) => !open && setObsId(null)}
         value={obsEntry?.observacao ?? ''}
-        onSave={(text) => obsId && setSaidaObservacao(obsId, text)}
+        onSave={async (text) => (obsId ? setSaidaObservacao(obsId, text) : null)}
       />
     </div>
   );

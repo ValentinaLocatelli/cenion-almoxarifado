@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { Battery, Zap, Loader2 } from 'lucide-react';
 import { useAuth } from '@/contexts/AuthContext';
 import { Button } from '@/components/ui/button';
@@ -7,29 +7,18 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { toast } from 'sonner';
-import { supabase } from '@/lib/supabase';
+import { ForgotPasswordPanel } from '@/components/auth/ForgotPasswordPanel';
+import { RECOVERY_QUERY_PARAM } from '@/lib/passwordRecovery';
 
 export default function Login() {
   const [identifier, setIdentifier] = useState('');
   const [password, setPassword] = useState('');
   const [isLoading, setIsLoading] = useState(false);
-  const [showForgotPassword, setShowForgotPassword] = useState(false);
-  const [adminEmail, setAdminEmail] = useState('');
-  const [isSubmittingForgot, setIsSubmittingForgot] = useState(false);
+  const [searchParams] = useSearchParams();
+  // /login?recuperar=1 ("Pedir novo link" da tela de redefinição) já abre o painel de recuperação.
+  const [showForgotPassword, setShowForgotPassword] = useState(searchParams.get(RECOVERY_QUERY_PARAM) === '1');
   const { login } = useAuth();
   const navigate = useNavigate();
-
-  const getErrorMessage = (error: unknown, fallback: string) => {
-    if (error instanceof Error && error.message) return error.message;
-    if (error && typeof error === 'object') {
-      const typed = error as Record<string, unknown>;
-      const parts = [typed.message, typed.details, typed.hint, typed.code]
-        .filter((part) => typeof part === 'string' && part.trim().length > 0)
-        .map((part) => String(part));
-      if (parts.length > 0) return parts.join(' | ');
-    }
-    return fallback;
-  };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -58,35 +47,6 @@ export default function Login() {
     }
   };
 
-  const handleAdminRecoveryEmail = async () => {
-    const email = adminEmail.trim().toLowerCase();
-    if (!email || !email.includes('@')) {
-      toast.error('Informe um e-mail válido de administrador ou supervisor.');
-      return;
-    }
-
-    setIsSubmittingForgot(true);
-    try {
-      const { data, error } = await supabase.rpc('request_manager_temporary_password', {
-        p_email: email,
-      });
-      if (error) throw error;
-
-      const temporaryPassword = typeof data === 'string' ? data : null;
-      if (temporaryPassword) {
-        toast.success(`Senha temporária gerada: ${temporaryPassword}`);
-      } else {
-        toast.success('Se o e-mail existir para Admin/Supervisor ativo, a recuperação foi processada.');
-      }
-      setAdminEmail('');
-      setShowForgotPassword(false);
-    } catch (error) {
-      toast.error(getErrorMessage(error, 'Não foi possível processar a recuperação de senha.'));
-    } finally {
-      setIsSubmittingForgot(false);
-    }
-  };
-
   return (
     <div className="min-h-screen flex">
       {/* Left Panel - Branding */}
@@ -98,10 +58,10 @@ export default function Login() {
             </div>
           </div>
           <h1 className="text-4xl font-bold text-sidebar-foreground mb-4">
-            Cenion | OS Manager
+            Cenion | Almoxarifado
           </h1>
           <p className="text-lg text-sidebar-foreground/70 mb-8">
-            Sistema de Gerenciamento de Ordens de Serviço para Manutenção de Baterias e Carregadores Industriais
+            Controle de estoque do almoxarifado: entradas, saídas e itens por unidade
           </p>
           <div className="flex items-center justify-center gap-6 text-sidebar-foreground/50">
             <div className="flex items-center gap-2">
@@ -124,21 +84,21 @@ export default function Login() {
               <div className="flex items-center justify-center w-10 h-10 rounded-xl bg-primary">
                 <Battery className="w-6 h-6 text-primary-foreground" />
               </div>
-              <span className="text-xl font-bold">OS Manager</span>
+              <span className="text-xl font-bold">Almoxarifado</span>
             </div>
             <CardTitle className="text-2xl">Bem-vindo de volta</CardTitle>
             <CardDescription>
-              Use o mesmo e-mail e a mesma senha cadastrados no Cenion OS Management. Técnicos também podem usar o login (nome.sobrenome), quando configurado.
+              Acesso de administradores e supervisores, com o mesmo e-mail e a mesma senha do Cenion OS Management.
             </CardDescription>
           </CardHeader>
           <CardContent>
             <form onSubmit={handleSubmit} className="space-y-4" autoComplete="on">
               <div className="space-y-2">
-                <Label htmlFor="identifier">E-mail ou Login (Técnico)</Label>
+                <Label htmlFor="identifier">E-mail</Label>
                 <Input
                   id="identifier"
                   type="text"
-                  placeholder="seu@email.com ou nome.sobrenome"
+                  placeholder="seu@email.com"
                   value={identifier}
                   onChange={(e) => setIdentifier(e.target.value)}
                   name="username"
@@ -182,31 +142,7 @@ export default function Login() {
               </Button>
 
               {showForgotPassword && (
-                <div className="rounded-lg border p-4 space-y-4">
-                  <div className="space-y-3">
-                    <p className="text-sm text-muted-foreground">
-                      Disponível apenas para Admin/Supervisor. Será gerada uma senha temporária de acesso.
-                    </p>
-                    <div className="space-y-2">
-                      <Label htmlFor="admin-email">E-mail do Admin/Supervisor</Label>
-                      <Input
-                        id="admin-email"
-                        type="email"
-                        placeholder="admin@empresa.com"
-                        value={adminEmail}
-                        onChange={(event) => setAdminEmail(event.target.value)}
-                      />
-                    </div>
-                    <Button
-                      type="button"
-                      className="w-full"
-                      onClick={() => void handleAdminRecoveryEmail()}
-                      disabled={isSubmittingForgot}
-                    >
-                      {isSubmittingForgot ? 'Processando...' : 'Gerar Senha Temporária'}
-                    </Button>
-                  </div>
-                </div>
+                <ForgotPasswordPanel initialIdentifier={identifier.includes('@') ? identifier.trim() : ''} />
               )}
             </form>
           </CardContent>

@@ -34,7 +34,8 @@ interface MovimentoFormDialogProps {
   onOpenChange: (open: boolean) => void;
   /** Se informado, o formulário abre em modo de edição. */
   initial?: MovimentoValues;
-  onSubmit: (values: MovimentoValues) => void;
+  /** Grava no banco; devolve a mensagem de erro (ou null). Com erro, o formulário fica aberto com o que foi digitado. */
+  onSubmit: (values: MovimentoValues) => Promise<string | null>;
 }
 
 const Required = () => <span className="text-destructive"> *</span>;
@@ -47,15 +48,20 @@ function FormBody({
 }: {
   kind: 'entrada' | 'saida';
   initial?: MovimentoValues;
-  onSubmit: (values: MovimentoValues) => void;
+  onSubmit: (values: MovimentoValues) => Promise<string | null>;
   onCancel: () => void;
 }) {
   const { itens, entradas } = useEstoque();
   const [values, setValues] = useState<MovimentoValues>(initial ?? emptyMovimento);
+  const [isSaving, setIsSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
   const editing = Boolean(initial);
 
   const set = (key: keyof MovimentoValues) => (event: React.ChangeEvent<HTMLInputElement>) =>
-    setValues((current) => ({ ...current, [key]: event.target.value }));
+    {
+      setValues((current) => ({ ...current, [key]: event.target.value }));
+      setError(null);
+    };
 
   // Puxa automaticamente os dados de um item já cadastrado no histórico
   const pickItem = (itemId: string) => {
@@ -72,14 +78,20 @@ function FormBody({
     }));
   };
 
-  const handleSubmit = (event: FormEvent<HTMLFormElement>) => {
+  const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
+    if (isSaving) return; // duplo clique: uma gravação só
     const quantidade = Number(values.quantidade);
     if (!values.produto.trim() || !values.modelo.trim()) return;
     if (kind === 'entrada' && !values.local.trim()) return;
     if (kind === 'saida' && !values.tecnico.trim()) return;
     if (!Number.isInteger(quantidade) || quantidade < (editing ? 0 : 1)) return;
-    onSubmit(values);
+    setIsSaving(true);
+    try {
+      setError(await onSubmit(values));
+    } finally {
+      setIsSaving(false);
+    }
   };
 
   return (
@@ -162,12 +174,20 @@ function FormBody({
         />
       </div>
 
+      {error && (
+        <p role="alert" className="text-sm text-destructive">
+          {error}
+        </p>
+      )}
+
       <DialogFooter>
-        <Button type="button" variant="outline" onClick={onCancel}>
+        <Button type="button" variant="outline" onClick={onCancel} disabled={isSaving}>
           Cancelar
         </Button>
-        <Button type="submit">
-          {editing ? 'Salvar alterações' : kind === 'entrada' ? 'Adicionar entrada' : 'Adicionar saída'}
+        <Button type="submit" disabled={isSaving}>
+          {isSaving
+            ? 'Salvando...'
+            : editing ? 'Salvar alterações' : kind === 'entrada' ? 'Adicionar entrada' : 'Adicionar saída'}
         </Button>
       </DialogFooter>
     </form>
@@ -186,9 +206,10 @@ export function MovimentoFormDialog({ kind, open, onOpenChange, initial, onSubmi
           kind={kind}
           initial={initial}
           onCancel={() => onOpenChange(false)}
-          onSubmit={(values) => {
-            onSubmit(values);
-            onOpenChange(false);
+          onSubmit={async (values) => {
+            const error = await onSubmit(values);
+            if (!error) onOpenChange(false);
+            return error;
           }}
         />
       </DialogContent>

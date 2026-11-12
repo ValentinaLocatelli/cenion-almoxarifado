@@ -448,8 +448,8 @@ export function mapProductionOrderRow(row: Record<string, unknown>): ProductionO
     technicianName: typeof row.technician_name === 'string' ? row.technician_name : undefined,
     waitingPartDescription: typeof row.waiting_part_description === 'string' ? row.waiting_part_description : undefined,
     waitingPartFromStatus:
-      row.waiting_part_from_status === 'IN_PRODUCTION'
-        ? 'IN_PRODUCTION'
+      typeof row.waiting_part_from_status === 'string' && row.waiting_part_from_status !== 'WAITING_PART'
+        ? (row.waiting_part_from_status as ProductionOrder['waitingPartFromStatus'])
         : undefined,
     productionStartTime: toOptionalDate(row.production_start_time),
     productionEndTime: toOptionalDate(row.production_end_time),

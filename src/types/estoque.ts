@@ -1,5 +1,9 @@
+// Estoque do almoxarifado: tabelas estoque_itens e estoque_movimentos (supabase/add_estoque.sql no cenion-os-management).
+// Datas em ISO (texto), como as telas já usavam.
+
 export interface Item {
   id: string;
+  unitId: string;
   produto: string;
   modelo: string;
   /** Quantidade mínima em estoque; abaixo ou igual a ela o item entra em emergência. */
@@ -17,6 +21,8 @@ export interface Entrada {
   dataEntrada: string;
   atualizacao: string;
   observacao: string;
+  /** Quem lançou (gravado pelo servidor). */
+  createdByName?: string;
 }
 
 export interface Saida {
@@ -27,6 +33,8 @@ export interface Saida {
   dataSaida: string;
   atualizacao: string;
   observacao: string;
+  /** Quem lançou (gravado pelo servidor). */
+  createdByName?: string;
 }
 
 export interface EntradaInput {
@@ -49,3 +57,6 @@ export interface ItemInput {
   modelo: string;
   quantidadeMinima?: number;
 }
+
+/** Resultado de uma gravação: `null` = deu certo; texto = mensagem de erro para mostrar ao usuário. */
+export type EstoqueResult = string | null;

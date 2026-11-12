@@ -1,0 +1,183 @@
+# Alterações sem commit de 28/10/2026 nas telas copiadas do OS Management, guardadas antes de apagar as telas sem rota
+# (decisão de 12/11/2026). Para reaplicar: git apply docs/alteracoes-28-10-telas-removidas.patch (com as telas restauradas do commit d8a2534).
+diff --git a/src/lib/supabaseMappers.ts b/src/lib/supabaseMappers.ts
+index 8c52873..3353cb0 100644
+--- a/src/lib/supabaseMappers.ts
++++ b/src/lib/supabaseMappers.ts
+@@ -448,8 +448,8 @@ export function mapProductionOrderRow(row: Record<string, unknown>): ProductionO
+     technicianName: typeof row.technician_name === 'string' ? row.technician_name : undefined,
+     waitingPartDescription: typeof row.waiting_part_description === 'string' ? row.waiting_part_description : undefined,
+     waitingPartFromStatus:
+-      row.waiting_part_from_status === 'IN_PRODUCTION'
+-        ? 'IN_PRODUCTION'
++      typeof row.waiting_part_from_status === 'string' && row.waiting_part_from_status !== 'WAITING_PART'
++        ? (row.waiting_part_from_status as ProductionOrder['waitingPartFromStatus'])
+         : undefined,
+     productionStartTime: toOptionalDate(row.production_start_time),
+     productionEndTime: toOptionalDate(row.production_end_time),
+diff --git a/src/pages/Parts.tsx b/src/pages/Parts.tsx
+index df07010..47fe871 100644
+--- a/src/pages/Parts.tsx
++++ b/src/pages/Parts.tsx
+@@ -28,6 +28,21 @@ import { useAppData } from '@/contexts/AppDataContext';
+ import { supabase } from '@/lib/supabase';
+ import { toast } from 'sonner';
+ import type { ProductionOrder, ProductionOrderDraft } from '@/types/production';
++import { STATUS_LABELS } from '@/types';
++
++// Status em que a OS tem fluxo próprio (peça, aprovação, despacho, encerramento): a solicitação não os altera.
++const TECHNICIAN_LOCKED_STATUSES: string[] = [
++  'WAITING_PART',
++  'WAITING_APPROVAL',
++  'SENT_TO_CUSTOMER',
++  'APPROVED',
++  'FINISHED_TECH',
++  'DISPATCHED',
++  'AWAITING_RECEIPT',
++  'INVOICED',
++  'FINALIZADO',
++  'GARANTIA',
++];
+ 
+ type RequestKind = 'VC' | 'OS';
+ 
+@@ -76,7 +91,7 @@ function toProductionOrderDraft(order: ProductionOrder, patch: Partial<Productio
+ 
+ export default function Parts() {
+   const { user } = useAuth();
+-  const { orders, productionOrders, updateProductionOrder } = useAppData();
++  const { orders, productionOrders, updateProductionOrder, updateOrder, createHistory } = useAppData();
+ 
+   const [kind, setKind] = useState<RequestKind | ''>('');
+   const [code, setCode] = useState('');
+@@ -164,7 +179,29 @@ export default function Parts() {
+ 
+       if (insertError) throw insertError;
+ 
+-      // A mudança automática de status só se aplica a VC em Ordem de Produção.
++      if (kind === 'OS') {
++        const order = assignedOs.find((o) => o.omieOSNumber === code);
++        // Status travados (já aguardando peça, despacho, encerramento etc.) não são alterados.
++        if (order && !TECHNICIAN_LOCKED_STATUSES.includes(order.status)) {
++          const previousStatus = order.status;
++          await updateOrder(order.id, {
++            status: 'WAITING_PART',
++            waitingPartFromStatus: previousStatus,
++            waitingPartDescription: description.trim(),
++          });
++          await createHistory({
++            osId: order.id,
++            previousStatus,
++            newStatus: 'WAITING_PART',
++            userId: user.id,
++            userName: user.name,
++            notes: `Peça solicitada: ${description.trim()} (qtd. ${quantity}).`,
++            createdAt: new Date(),
++          });
++        }
++      }
++
++      // VC em Ordem de Produção tem fluxo próprio de status.
+       if (kind === 'VC') {
+         const productionOrder = assignedVcs.find((o) => o.code === code);
+         if (productionOrder && productionOrder.status !== 'WAITING_PART') {
+@@ -172,7 +209,7 @@ export default function Parts() {
+           const draft = toProductionOrderDraft(productionOrder, {
+             status: 'WAITING_PART',
+             waitingPartDescription: description.trim(),
+-            waitingPartFromStatus: previousStatus === 'IN_PRODUCTION' ? 'IN_PRODUCTION' : undefined,
++            waitingPartFromStatus: previousStatus,
+           });
+           await updateProductionOrder(productionOrder.id, { ...draft, actorUserId: user.id });
+           await supabase.from('production_order_history').insert({
+@@ -201,18 +238,25 @@ export default function Parts() {
+     if (request.received || !user?.id) return;
+     setReceivingId(request.id);
+     try {
+-      const { error: updateError } = await supabase
++      // RLS que nega o UPDATE devolve 0 linhas sem erro: sem esta checagem a tela mostrava sucesso sem gravar.
++      const { data: updatedRequests, error: updateError } = await supabase
+         .from('part_requests')
+         .update({ received: true, received_at: new Date().toISOString() })
+-        .eq('id', request.id);
++        .eq('id', request.id)
++        .eq('received', false)
++        .select('id');
+ 
+       if (updateError) throw updateError;
++      if (!updatedRequests || updatedRequests.length === 0) {
++        throw new Error('Não foi possível confirmar o recebimento da peça.');
++      }
+ 
+       if (request.orderType === 'VC') {
+         const productionOrder = productionOrders.find((o) => o.code === request.orderCode);
+         if (productionOrder && productionOrder.status === 'WAITING_PART') {
++          const returnStatus = productionOrder.waitingPartFromStatus ?? 'IN_PRODUCTION';
+           const draft = toProductionOrderDraft(productionOrder, {
+-            status: 'IN_PRODUCTION',
++            status: returnStatus,
+             waitingPartDescription: undefined,
+             waitingPartFromStatus: undefined,
+           });
+@@ -221,7 +265,7 @@ export default function Parts() {
+             unit_id: productionOrder.unitId,
+             production_order_id: productionOrder.id,
+             previous_status: 'WAITING_PART',
+-            new_status: 'IN_PRODUCTION',
++            new_status: returnStatus,
+             user_id: user.id,
+             user_name: user.name,
+             notes: `Peça recebida: ${request.partDescription}. Produção retomada.`,
+@@ -229,6 +273,30 @@ export default function Parts() {
+         }
+       }
+ 
++      if (request.orderType === 'OS') {
++        const order = orders.find((o) => o.omieOSNumber === request.orderCode);
++        const hasOtherPending = requests.some(
++          (item) => item.id !== request.id && !item.received && item.orderType === 'OS' && item.orderCode === request.orderCode,
++        );
++        if (order && order.status === 'WAITING_PART' && !hasOtherPending) {
++          const returnStatus = order.waitingPartFromStatus ?? 'IN_ANALYSIS';
++          await updateOrder(order.id, {
++            status: returnStatus,
++            waitingPartFromStatus: undefined,
++            waitingPartDescription: undefined,
++          });
++          await createHistory({
++            osId: order.id,
++            previousStatus: 'WAITING_PART',
++            newStatus: returnStatus,
++            userId: user.id,
++            userName: user.name,
++            notes: `Peça recebida: ${request.partDescription}. OS voltou para ${STATUS_LABELS[returnStatus]}.`,
++            createdAt: new Date(),
++          });
++        }
++      }
++
+       toast.success('Peça marcada como recebida.');
+       await loadRequests();
+     } catch (error) {
+diff --git a/src/types/production.ts b/src/types/production.ts
+index 4cd8a5a..08e0b70 100644
+--- a/src/types/production.ts
++++ b/src/types/production.ts
+@@ -168,7 +168,7 @@ export interface ProductionOrder {
+   technicianId?: string;
+   technicianName?: string;
+   waitingPartDescription?: string;
+-  waitingPartFromStatus?: 'IN_PRODUCTION';
++  waitingPartFromStatus?: ProductionOrderStatus;
+   productionStartTime?: Date;
+   productionEndTime?: Date;
+   purchaseOrderAttachments?: ProductionAttachment[];
+@@ -197,7 +197,7 @@ export interface ProductionOrderDraft {
+   technicianId?: string;
+   technicianName?: string;
+   waitingPartDescription?: string;
+-  waitingPartFromStatus?: 'IN_PRODUCTION';
++  waitingPartFromStatus?: ProductionOrderStatus;
+   productionStartTime?: Date;
+   productionEndTime?: Date;
+   purchaseOrderAttachments?: ProductionAttachment[];

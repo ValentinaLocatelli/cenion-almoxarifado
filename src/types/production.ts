@@ -168,7 +168,7 @@ export interface ProductionOrder {
   technicianId?: string;
   technicianName?: string;
   waitingPartDescription?: string;
-  waitingPartFromStatus?: 'IN_PRODUCTION';
+  waitingPartFromStatus?: ProductionOrderStatus;
   productionStartTime?: Date;
   productionEndTime?: Date;
   purchaseOrderAttachments?: ProductionAttachment[];
@@ -197,7 +197,7 @@ export interface ProductionOrderDraft {
   technicianId?: string;
   technicianName?: string;
   waitingPartDescription?: string;
-  waitingPartFromStatus?: 'IN_PRODUCTION';
+  waitingPartFromStatus?: ProductionOrderStatus;
   productionStartTime?: Date;
   productionEndTime?: Date;
   purchaseOrderAttachments?: ProductionAttachment[];

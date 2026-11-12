@@ -4,7 +4,6 @@ import { TooltipProvider } from '@/components/ui/tooltip';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { AuthProvider } from '@/contexts/AuthContext';
-import { AppDataProvider } from '@/contexts/AppDataContext';
 import { EstoqueProvider } from '@/contexts/EstoqueContext';
 import { ActiveUnitProvider } from '@/contexts/ActiveUnitContext';
 import { ProtectedRoute } from '@/components/ProtectedRoute';
@@ -26,7 +25,7 @@ const App = () => (
     <TooltipProvider>
       <AuthProvider>
         <ActiveUnitProvider>
-          <AppDataProvider>
+          {/* Sem AppDataProvider: o almoxarifado não usa OS, histórico nem VCs (antes eram carregados a cada login, sem uso). */}
             <EstoqueProvider>
             <Toaster />
             <Sonner />
@@ -43,9 +42,10 @@ const App = () => (
                 )}
               />
 
+              {/* Almoxarifado: só ADMIN e SUPERVISOR (requireAdmin = gestor). O AuthContext já recusa técnico no login. */}
               <Route
                 element={
-                  <ProtectedRoute>
+                  <ProtectedRoute requireAdmin>
                     <AppLayout />
                   </ProtectedRoute>
                 }
@@ -61,7 +61,6 @@ const App = () => (
               </Routes>
             </BrowserRouter>
             </EstoqueProvider>
-          </AppDataProvider>
         </ActiveUnitProvider>
       </AuthProvider>
     </TooltipProvider>

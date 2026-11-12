@@ -7,12 +7,18 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { toast } from 'sonner';
 import { supabase } from '@/lib/supabase';
+import { RECOVERY_QUERY_PARAM } from '@/lib/passwordRecovery';
 
+// Tela aberta pelo link do e-mail de "Esqueceu sua senha?" (o Supabase entrega a sessão de recuperação na URL).
+// Arquivo idêntico no OS Management, no Produção e no Estoque.
 export default function ResetPassword() {
   const navigate = useNavigate();
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
   const [isLoading, setIsLoading] = useState(false);
+  const [linkExpired, setLinkExpired] = useState(false);
+
+  const requestNewLink = () => navigate(`/login?${RECOVERY_QUERY_PARAM}=1`);
 
   const handleSubmit = async (event: React.FormEvent) => {
     event.preventDefault();
@@ -34,7 +40,8 @@ export default function ResetPassword() {
       } = await supabase.auth.getSession();
 
       if (!session) {
-        toast.error('Link inválido ou expirado. Solicite um novo e-mail de recuperação.');
+        setLinkExpired(true);
+        toast.error('Link inválido ou expirado. Peça um novo e-mail de recuperação.');
         return;
       }
 
@@ -53,7 +60,9 @@ export default function ResetPassword() {
         if (!isMissingColumn) throw profileError;
       }
 
-      toast.success('Senha redefinida com sucesso.');
+      // A sessão do link serve só para trocar a senha: a pessoa entra de novo com a senha nova.
+      await supabase.auth.signOut();
+      toast.success('Senha redefinida com sucesso. Entre com a nova senha.');
       navigate('/login');
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Não foi possível redefinir a senha.';
@@ -68,7 +77,7 @@ export default function ResetPassword() {
       <Card className="w-full max-w-md">
         <CardHeader>
           <CardTitle>Redefinir Senha</CardTitle>
-          <CardDescription>Defina uma nova senha para sua conta de administrador.</CardDescription>
+          <CardDescription>Defina uma nova senha para a sua conta.</CardDescription>
         </CardHeader>
         <CardContent>
           <form onSubmit={handleSubmit} className="space-y-4">
@@ -79,6 +88,7 @@ export default function ResetPassword() {
                 type="password"
                 value={password}
                 onChange={(event) => setPassword(event.target.value)}
+                autoComplete="new-password"
                 required
               />
             </div>
@@ -89,6 +99,7 @@ export default function ResetPassword() {
                 type="password"
                 value={confirmPassword}
                 onChange={(event) => setConfirmPassword(event.target.value)}
+                autoComplete="new-password"
                 required
               />
             </div>
@@ -101,6 +112,14 @@ export default function ResetPassword() {
               ) : (
                 'Salvar Nova Senha'
               )}
+            </Button>
+            {linkExpired && (
+              <p role="alert" className="text-sm text-destructive">
+                O link deste e-mail venceu ou já foi usado.
+              </p>
+            )}
+            <Button type="button" variant="link" className="w-full text-sm" onClick={requestNewLink}>
+              Link vencido? Pedir novo link
             </Button>
           </form>
         </CardContent>

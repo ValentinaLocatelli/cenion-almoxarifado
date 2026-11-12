@@ -4,7 +4,28 @@ import { Check, ChevronDown, ChevronUp } from "lucide-react";
 
 import { cn } from "@/lib/utils";
 
-const Select = SelectPrimitive.Root;
+interface SelectSearchState {
+  query: string;
+  setQuery: (query: string) => void;
+}
+
+const SelectSearchContext = React.createContext<SelectSearchState | null>(null);
+
+const Select = ({ onOpenChange, ...props }: React.ComponentProps<typeof SelectPrimitive.Root>) => {
+  const [query, setQuery] = React.useState("");
+
+  return (
+    <SelectSearchContext.Provider value={{ query, setQuery }}>
+      <SelectPrimitive.Root
+        {...props}
+        onOpenChange={(open) => {
+          if (open) setQuery("");
+          onOpenChange?.(open);
+        }}
+      />
+    </SelectSearchContext.Provider>
+  );
+};
 
 const SelectGroup = SelectPrimitive.Group;
 
@@ -61,34 +82,103 @@ SelectScrollDownButton.displayName = SelectPrimitive.ScrollDownButton.displayNam
 const SelectContent = React.forwardRef<
   React.ElementRef<typeof SelectPrimitive.Content>,
   React.ComponentPropsWithoutRef<typeof SelectPrimitive.Content>
->(({ className, children, position = "popper", ...props }, ref) => (
-  <SelectPrimitive.Portal>
-    <SelectPrimitive.Content
-      ref={ref}
-      className={cn(
-        "relative z-50 max-h-96 min-w-[8rem] overflow-hidden rounded-md border bg-popover text-popover-foreground shadow-md data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 data-[state=closed]:zoom-out-95 data-[state=open]:zoom-in-95 data-[side=bottom]:slide-in-from-top-2 data-[side=left]:slide-in-from-right-2 data-[side=right]:slide-in-from-left-2 data-[side=top]:slide-in-from-bottom-2",
-        position === "popper" &&
-          "data-[side=bottom]:translate-y-1 data-[side=left]:-translate-x-1 data-[side=right]:translate-x-1 data-[side=top]:-translate-y-1",
-        className,
-      )}
-      position={position}
-      {...props}
-    >
-      <SelectScrollUpButton />
-      <SelectPrimitive.Viewport
+>(({ className, children, position = "popper", ...props }, ref) => {
+  const search = React.useContext(SelectSearchContext);
+  const inputRef = React.useRef<HTMLInputElement>(null);
+  const filteredChildren = filterSelectChildren(children, search?.query ?? "");
+  const hasOptions = countSelectItems(filteredChildren) > 0;
+
+  return (
+    <SelectPrimitive.Portal>
+      <SelectPrimitive.Content
+        ref={ref}
         className={cn(
-          "p-1",
+          "relative z-50 max-h-96 min-w-[8rem] overflow-hidden rounded-md border bg-popover text-popover-foreground shadow-md data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 data-[state=closed]:zoom-out-95 data-[state=open]:zoom-in-95 data-[side=bottom]:slide-in-from-top-2 data-[side=left]:slide-in-from-right-2 data-[side=right]:slide-in-from-left-2 data-[side=top]:slide-in-from-bottom-2",
           position === "popper" &&
-            "h-[var(--radix-select-trigger-height)] w-full min-w-[var(--radix-select-trigger-width)]",
+            "data-[side=bottom]:translate-y-1 data-[side=left]:-translate-x-1 data-[side=right]:translate-x-1 data-[side=top]:-translate-y-1",
+          className,
         )}
+        position={position}
+        {...props}
       >
-        {children}
-      </SelectPrimitive.Viewport>
-      <SelectScrollDownButton />
-    </SelectPrimitive.Content>
-  </SelectPrimitive.Portal>
-));
+        <input
+          ref={inputRef}
+          type="text"
+          value={search?.query ?? ""}
+          onChange={(event) => search?.setQuery(event.target.value)}
+          onKeyDown={(event) => {
+            if (event.key === "Enter") {
+              const firstOption = event.currentTarget
+                .closest('[role="listbox"]')
+                ?.querySelector<HTMLElement>('[role="option"]:not([data-disabled=""])');
+              if (firstOption) {
+                event.preventDefault();
+                firstOption.click();
+              }
+            } else if (event.key.length === 1 && !event.ctrlKey && !event.metaKey && !event.altKey) {
+              event.stopPropagation();
+            }
+          }}
+          placeholder="Digite para buscar..."
+          aria-label="Buscar opções"
+          className="mx-1 my-1 h-8 w-[calc(100%-0.5rem)] rounded-sm border border-input bg-background px-2 text-sm outline-none placeholder:text-muted-foreground focus:ring-1 focus:ring-ring"
+        />
+        <SelectPrimitive.ScrollUpButton className="flex cursor-default items-center justify-center py-1">
+          <ChevronUp className="h-4 w-4" />
+        </SelectPrimitive.ScrollUpButton>
+        <SelectPrimitive.Viewport
+          className={cn(
+            "max-h-64 overflow-y-auto p-1",
+            position === "popper" &&
+              "w-full min-w-[var(--radix-select-trigger-width)]",
+          )}
+        >
+          {hasOptions ? filteredChildren : <div className="px-2 py-6 text-center text-sm">Nenhuma opção encontrada</div>}
+        </SelectPrimitive.Viewport>
+        <SelectPrimitive.ScrollDownButton className="flex cursor-default items-center justify-center py-1">
+          <ChevronDown className="h-4 w-4" />
+        </SelectPrimitive.ScrollDownButton>
+      </SelectPrimitive.Content>
+    </SelectPrimitive.Portal>
+  );
+});
 SelectContent.displayName = SelectPrimitive.Content.displayName;
+
+function getSelectItemText(children: React.ReactNode): string {
+  if (typeof children === "string" || typeof children === "number") return String(children);
+  if (Array.isArray(children)) return children.map(getSelectItemText).join(" ");
+  if (React.isValidElement<{ children?: React.ReactNode }>(children)) {
+    return getSelectItemText(children.props.children);
+  }
+  return "";
+}
+
+function filterSelectChildren(children: React.ReactNode, query: string): React.ReactNode {
+  const normalizedQuery = query.trim().toLocaleLowerCase();
+  return React.Children.map(children, (child) => {
+    if (!React.isValidElement<{ children?: React.ReactNode }>(child)) return child;
+
+    if (child.type === SelectItem) {
+      return getSelectItemText(child.props.children).toLocaleLowerCase().includes(normalizedQuery)
+        ? child
+        : null;
+    }
+
+    if (child.props.children !== undefined) {
+      return React.cloneElement(child, undefined, filterSelectChildren(child.props.children, query));
+    }
+
+    return child;
+  });
+}
+
+function countSelectItems(children: React.ReactNode): number {
+  return React.Children.toArray(children).reduce<number>((total, child) => {
+    if (!React.isValidElement<{ children?: React.ReactNode }>(child)) return total;
+    if (child.type === SelectItem) return total + 1;
+    return total + countSelectItems(child.props.children);
+  }, 0);
+}
 
 const SelectLabel = React.forwardRef<
   React.ElementRef<typeof SelectPrimitive.Label>,

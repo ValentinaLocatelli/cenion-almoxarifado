@@ -31,8 +31,9 @@ export function ProtectedRoute({
     return <Navigate to="/change-password" replace />;
   }
 
+  // No almoxarifado o layout inteiro exige gestor: mandar para /dashboard (que também exige) criaria um laço.
   if (requireAdmin && !isManager) {
-    return <Navigate to="/dashboard" replace />;
+    return <Navigate to="/login" replace />;
   }
 
   if (requireStrictAdmin && !isAdmin) {

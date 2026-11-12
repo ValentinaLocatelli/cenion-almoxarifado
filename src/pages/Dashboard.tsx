@@ -15,6 +15,7 @@ import {
 } from '@/components/ui/table';
 import { useEstoque } from '@/contexts/useEstoque';
 import { formatDateTime } from '@/lib/formatDate';
+import { EstoqueStatus } from '@/components/estoque/EstoqueStatus';
 
 const MOVIMENTOS_VISIVEIS = 15;
 
@@ -108,6 +109,8 @@ export default function Dashboard() {
   return (
     <div className="animate-fade-in space-y-6">
       <PageHeader title="Dashboard" description="Visão geral do almoxarifado" />
+
+      <EstoqueStatus />
 
       <div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-3">
         {cards.map((card) => {

@@ -18,6 +18,8 @@ import {
 } from '@/components/estoque/MovimentoFormDialog';
 import { useEstoque } from '@/contexts/useEstoque';
 import { formatDate, formatDateTime } from '@/lib/formatDate';
+import { toast } from 'sonner';
+import { EstoqueStatus } from '@/components/estoque/EstoqueStatus';
 
 export default function Entrada() {
   const { entradas, itens, addEntrada, updateEntrada, removeEntrada, setEntradaObservacao } =
@@ -59,6 +61,8 @@ export default function Entrada() {
         </Button>
       </PageHeader>
 
+      <EstoqueStatus />
+
       <div className="overflow-x-auto rounded-xl border border-border bg-card shadow-sm">
         <Table>
           <TableHeader>
@@ -88,6 +92,7 @@ export default function Entrada() {
                       {item?.modelo}
                       {entrada.fornecedor && ` · ${entrada.fornecedor}`}
                       {entrada.local && ` · ${entrada.local}`}
+                      {entrada.createdByName && ` · Lançado por ${entrada.createdByName}`}
                     </div>
                     {entrada.observacao && (
                       <div className="mt-1 text-sm italic text-muted-foreground">
@@ -105,7 +110,10 @@ export default function Entrada() {
                         setFormOpen(true);
                       }}
                       onObservation={() => setObsId(entrada.id)}
-                      onDelete={() => removeEntrada(entrada.id)}
+                      onDelete={async () => {
+                        const erro = await removeEntrada(entrada.id);
+                        if (erro) toast.error(erro);
+                      }}
                     />
                   </TableCell>
                 </TableRow>
@@ -121,7 +129,7 @@ export default function Entrada() {
         open={formOpen}
         onOpenChange={setFormOpen}
         initial={initial}
-        onSubmit={(values) => {
+        onSubmit={async (values) => {
           const payload = {
             produto: values.produto,
             modelo: values.modelo,
@@ -129,8 +137,7 @@ export default function Entrada() {
             local: values.local,
             quantidade: Number(values.quantidade),
           };
-          if (editingId) updateEntrada(editingId, payload);
-          else addEntrada(payload);
+          return editingId ? updateEntrada(editingId, payload) : addEntrada(payload);
         }}
       />
 
@@ -139,7 +146,7 @@ export default function Entrada() {
         open={Boolean(obsId)}
         onOpenChange={(open) => !open && setObsId(null)}
         value={obsEntry?.observacao ?? ''}
-        onSave={(text) => obsId && setEntradaObservacao(obsId, text)}
+        onSave={async (text) => (obsId ? setEntradaObservacao(obsId, text) : null)}
       />
     </div>
   );

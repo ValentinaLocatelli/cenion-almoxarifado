@@ -23,6 +23,8 @@ import { RowActions } from '@/components/estoque/RowActions';
 import { useEstoque } from '@/contexts/useEstoque';
 import { firstName, normalizeText } from '@/lib/formatDate';
 import type { Item } from '@/types/estoque';
+import { toast } from 'sonner';
+import { EstoqueStatus } from '@/components/estoque/EstoqueStatus';
 
 function ItemForm({
   item,
@@ -30,7 +32,8 @@ function ItemForm({
   onCancel,
 }: {
   item?: Item;
-  onSubmit: (values: { produto: string; modelo: string; quantidadeMinima?: number }) => void;
+  /** Grava no banco; devolve a mensagem de erro (ou null). Com erro, o formulário fica aberto. */
+  onSubmit: (values: { produto: string; modelo: string; quantidadeMinima?: number }) => Promise<string | null>;
   onCancel: () => void;
 }) {
   const [produto, setProduto] = useState(item?.produto ?? '');
@@ -39,12 +42,21 @@ function ItemForm({
     item?.quantidadeMinima !== undefined ? String(item.quantidadeMinima) : '',
   );
 
-  const handleSubmit = (event: FormEvent<HTMLFormElement>) => {
+  const [isSaving, setIsSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
+    if (isSaving) return;
     if (!produto.trim() || !modelo.trim()) return;
     const parsed = minima.trim() === '' ? undefined : Number(minima);
     if (parsed !== undefined && (!Number.isInteger(parsed) || parsed < 0)) return;
-    onSubmit({ produto, modelo, quantidadeMinima: parsed });
+    setIsSaving(true);
+    try {
+      setError(await onSubmit({ produto, modelo, quantidadeMinima: parsed }));
+    } finally {
+      setIsSaving(false);
+    }
   };
 
   return (
@@ -88,11 +100,18 @@ function ItemForm({
           placeholder="Ex.: 10"
         />
       </div>
+      {error && (
+        <p role="alert" className="text-sm text-destructive">
+          {error}
+        </p>
+      )}
       <DialogFooter>
-        <Button type="button" variant="outline" onClick={onCancel}>
+        <Button type="button" variant="outline" onClick={onCancel} disabled={isSaving}>
           Cancelar
         </Button>
-        <Button type="submit">{item ? 'Salvar alterações' : 'Adicionar item'}</Button>
+        <Button type="submit" disabled={isSaving}>
+          {isSaving ? 'Salvando...' : item ? 'Salvar alterações' : 'Adicionar item'}
+        </Button>
       </DialogFooter>
     </form>
   );
@@ -159,6 +178,8 @@ export default function Itens() {
         </Button>
       </PageHeader>
 
+      <EstoqueStatus />
+
       {filter && (
         <div className="flex items-center gap-2 text-sm">
           <span className="text-muted-foreground">Filtrando pelo primeiro nome:</span>
@@ -208,7 +229,10 @@ export default function Itens() {
                       setEditingId(item.id);
                       setFormOpen(true);
                     }}
-                    onDelete={() => removeItem(item.id)}
+                    onDelete={async () => {
+                      const erro = await removeItem(item.id);
+                      if (erro) toast.error(erro);
+                    }}
                     deleteDescription="As entradas e saídas registradas para este item também serão excluídas."
                   />
                 </TableCell>
@@ -266,10 +290,10 @@ export default function Itens() {
           <ItemForm
             item={editing}
             onCancel={() => setFormOpen(false)}
-            onSubmit={(values) => {
-              if (editingId) updateItem(editingId, values);
-              else addItem(values);
-              setFormOpen(false);
+            onSubmit={async (values) => {
+              const erro = editingId ? await updateItem(editingId, values) : await addItem(values);
+              if (!erro) setFormOpen(false);
+              return erro;
             }}
           />
         </DialogContent>

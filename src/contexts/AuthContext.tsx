@@ -2,6 +2,7 @@ import { createContext, useContext, useEffect, useMemo, useState, useCallback } 
 import type { User } from '@/types';
 import { supabase } from '@/lib/supabase';
 import { mapUserRow } from '@/lib/supabaseMappers';
+import { isProfileAllowed, type AllowedRoles } from '@/lib/sessionProfile';
 
 interface AuthContextType {
   user: User | null;
@@ -24,6 +25,9 @@ interface AuthContextType {
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
+/** O almoxarifado é só para gestores: técnico não entra (o desativado também não). */
+const ALLOWED_ROLES: AllowedRoles = ['ADMIN', 'SUPERVISOR'];
+const ROLE_DENIED_MESSAGE = 'O almoxarifado é só para administradores e supervisores.';
 const TECH_EMAIL_DOMAIN = 'tecnico.cenion.com';
 
 async function loadUserProfile(authUserId: string): Promise<User | null> {
@@ -48,10 +52,19 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
         if (session?.user) {
           const profile = await loadUserProfile(session.user.id);
-          setUser(profile);
+          if (isProfileAllowed(profile, ALLOWED_ROLES)) {
+            setUser(profile);
+          } else {
+            // Sessão guardada de usuário desativado (ou sem acesso a este app): encerra em vez de entrar.
+            await supabase.auth.signOut();
+            setUser(null);
+          }
         } else {
           setUser(null);
         }
+      } catch {
+        // Sem conseguir ler o perfil não há como confirmar o acesso: volta para o login.
+        setUser(null);
       } finally {
         setIsLoading(false);
       }
@@ -68,8 +81,17 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       }
 
       void loadUserProfile(session.user.id)
-        .then((profile) => setUser(profile))
-        .catch(() => setUser(null));
+        .then(async (profile) => {
+          if (isProfileAllowed(profile, ALLOWED_ROLES)) {
+            setUser(profile);
+            return;
+          }
+          await supabase.auth.signOut();
+          setUser(null);
+        })
+        // Falha de rede ao reler o perfil (por exemplo, na renovação do token): mantém quem já está na tela, em vez de
+        // deslogar; a RLS do banco continua valendo.
+        .catch(() => undefined);
     });
 
     return () => {
@@ -139,11 +161,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       };
     }
 
-    // O Cenion Produção usa a mesma autenticação do Cenion OS Management.
-    // Portanto, qualquer usuário ativo (ADMIN, SUPERVISOR ou TECNICO)
-    // pode entrar com o e-mail cadastrado no Supabase.
-    // O login no formato nome.sobrenome continua disponível para técnicos
-    // que usam o identificador técnico configurado neste projeto.
+    // Mesma autenticação do Cenion OS Management, mas o almoxarifado é só para administrador e supervisor.
+    if (!isProfileAllowed(profile, ALLOWED_ROLES)) {
+      await supabase.auth.signOut();
+      setUser(null);
+      return { success: false, error: ROLE_DENIED_MESSAGE };
+    }
 
     setUser(profile);
     return { success: true, requiresPasswordChange: profile.mustChangePassword };
